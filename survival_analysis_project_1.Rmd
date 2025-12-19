@@ -1,0 +1,206 @@
+---
+title: "Survival_analysis_project"
+output:
+  html_document:
+    toc : false 
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,        # show code (or set to FALSE if you want to hide it)
+  message = FALSE,    # hide all package load messages
+  warning = FALSE,    # hide all warnings
+  error = FALSE    # hide errors in knitting
+
+)
+
+```
+
+```{r}
+# install.packages("patchwork")
+library(patchwork)
+# install.packages("ggcorrplot")
+library(ggcorrplot)
+
+
+# Load packages
+library(survival)
+library(knitr)
+library(ggplot2)
+library(skimr)
+library(corrplot)
+library(survminer)
+library(dplyr)
+library(MASS)
+library(tidyr)
+
+```
+
+```{r}
+#download the files :
+
+df <- read.csv("C:/Users/mayna/OneDrive/Notability/Survival analysis/SEER Breast Cancer Dataset .csv")
+#colnames(df)
+
+
+#Age - numaric
+#Race - cat - Black/ other/ white
+#Marital Status - cat -  Divorced / married /single / widow/ seprated
+#T Stage - cat -  T1 /T2/T3/T4
+#N Stage - cat - N1/N2/N3
+#6th Stage - cat - IIA / IIB/ IIIA / IIIB / IIIC
+#Grade - cat - Moderately differentiated; Grade II / Poorly differentiated; Grade III / Well differentiated; Grade I / Undifferentiated; anaplastic; Grade IV
+#A Stage -cat - Distant / Ragional
+#Tumor Size - numric
+#Estrogen Status - cat - "Positive" "Negative"
+#Progesterone Status - cat - "Positive" "Negative"
+#Regional Node Examined - numaric
+#Reginol Node Positive - numric
+#Survival Months -  numric
+#Status - cat -  "Alive" "Dead" 
+
+
+
+
+df_seer_clean <- df %>%
+  mutate(
+    # Numeric variables
+    Age                     = as.numeric(Age),
+    Tumor.Size              = as.numeric(Tumor.Size),
+    Regional.Node.Examined  = as.numeric(Regional.Node.Examined),
+    Reginol.Node.Positive   = as.numeric(Reginol.Node.Positive),
+    Survival.Months                    = as.numeric(Survival.Months),
+    status                  = ifelse(Status == "Dead", 1, 0),  # 1 = dead, 0 = alive
+    
+    # Categorical variables as regular factors
+    Race           = factor(Race),
+    Marital.Status = factor(Marital.Status),
+    T.Stage        = factor(T.Stage),
+    N.Stage        = factor(N.Stage),
+    X6th.Stage     = factor(X6th.Stage),
+    Grade          = factor(Grade),
+    A.Stage        = factor(A.Stage),
+    Estrogen.Status     = factor(Estrogen.Status),
+    Progesterone.Status = factor(Progesterone.Status)
+  ) %>%
+  
+  # reorder columns to put survival variables first
+  dplyr::select(
+    status,
+    Age, Race, Marital.Status,
+    T.Stage, N.Stage, X6th.Stage, Grade, A.Stage,
+    Tumor.Size,
+    Estrogen.Status, Progesterone.Status,
+    Regional.Node.Examined, Reginol.Node.Positive,
+    everything()
+  )
+
+ 
+
+```
+
+```{r}
+skim(df_seer_clean)
+
+```
+
+
+```{r}
+
+#plots for numerics :
+numeric_vars <- df_seer_clean[, sapply(df_seer_clean, is.numeric)]
+
+
+#  Histograms of numeric variables
+
+
+for (v in names(numeric_vars)) {
+  print(
+    ggplot(df_seer_clean, aes(x = .data[[v]])) +
+      geom_histogram(bins = 30, fill = "lightblue", color = "white") +
+      theme_minimal() +
+      labs(
+        title = paste("Histogram of", v),
+        x = v,
+        y = "Count"
+      )
+  )
+}
+
+
+
+```
+```{r}
+#plots for cat
+library(ggplot2)
+library(dplyr)
+
+# Select categorical variables
+cat_vars <- df_seer_clean[, sapply(df_seer_clean, is.factor)]
+
+# Loop and plot each categorical variable
+for (v in names(cat_vars)) {
+  
+  plot_obj <- ggplot(df_seer_clean, aes(x = .data[[v]])) +
+    geom_bar(fill = "lightgreen", color = "white") +
+    geom_text(
+      stat = "count",
+      aes(label = ..count..),
+      vjust = -0.3,
+      size = 3
+    ) +
+    theme_minimal() +
+    labs(
+      title = paste("Bar Plot of", v),
+      x = v,
+      y = "Count"
+    ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)  # rotate labels for readability
+    )
+  
+  print(plot_obj)
+}
+
+
+```
+
+```{r}
+
+library(corrplot)
+
+# Select numeric variables for correlation
+corr_vars <- df_seer_clean[, c(
+  "Age",
+  "Tumor.Size",
+  "Regional.Node.Examined",
+  "Reginol.Node.Positive",
+  "Survival.Months",
+  "time"
+  # You can add "status" if you want: "status"
+)]
+
+# Compute Spearman correlation matrix
+cor_mat <- cor(corr_vars, method = "spearman", use = "complete.obs")
+cor_mat
+
+
+corrplot(
+  cor_mat,
+  method = "color",
+  type = "upper",
+  tl.col = "black",
+  tl.srt = 45,
+  addCoef.col = "black",   # add correlation numbers
+  number.cex = 0.8,
+  col = colorRampPalette(c("darkblue", "white", "darkred"))(200),
+  title = "Correlation Among Numeric Variables in the SEER Breast Cancer Dataset",
+  mar = c(0,0,3,0)
+)
+
+
+```
+
+#### The numeric variables in your dataset show weak correlations overall, except for a modest relationship between nodes examined and nodes positive, and a perfect expected identity between time and Survival.Months. There is no harmful multicollinearity, so all numeric predictors are suitable for use in survival models.
+
