@@ -1,0 +1,864 @@
+---
+title: "Survival_analysis_project"
+output:
+  html_document:
+    toc : false 
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,        # show code (or set to FALSE if you want to hide it)
+  message = FALSE,    # hide all package load messages
+  warning = FALSE,    # hide all warnings
+  error = FALSE    # hide errors in knitting
+)
+
+```
+
+```{r}
+#install.packages("patchwork")
+library(patchwork)
+#install.packages("ggcorrplot")
+library(ggcorrplot)
+#install.packages("dplyr")
+library(dplyr)
+#install.packages("survRM2")
+
+# Load packages
+library(survival)
+library(knitr)
+library(ggplot2)
+library(skimr)
+library(corrplot)
+library(survminer)
+library(dplyr)
+library(MASS)
+library(tidyr)
+library(survRM2)
+library(randomForestSRC)
+```
+
+```{r}
+#download the files :
+
+df <- read.csv("C:/Users/tamar/OneDrive/uni/4th/survival_analysis/SEER Breast Cancer Dataset .csv") #Tamar
+#df <- read.csv("C:/Users/mayna/OneDrive/Notability/Survival analysis/SEER Breast Cancer Dataset .csv") #May 
+
+#colnames(df)
+
+
+#Age - numaric
+#Race - cat - Black/ other/ white
+#Marital Status - cat -  Divorced / married /single / widow/ seprated
+#T Stage - cat -  T1 /T2/T3/T4
+#N Stage - cat - N1/N2/N3
+#6th Stage - cat - IIA / IIB/ IIIA / IIIB / IIIC
+#Grade - cat - Moderately differentiated; Grade II / Poorly differentiated; Grade III / Well differentiated; Grade I / Undifferentiated; anaplastic; Grade IV
+#A Stage -cat - Distant / Ragional
+#Tumor Size - numric
+#Estrogen Status - cat - "Positive" "Negative"
+#Progesterone Status - cat - "Positive" "Negative"
+#Regional Node Examined - numaric
+#Reginol Node Positive - numric
+#Survival Months -  numric
+#Status - cat -  "Alive" "Dead" 
+
+
+
+
+df_seer_clean <- df %>%
+  mutate(
+    # Numeric variables
+    Age                     = as.numeric(Age),
+    Tumor.Size              = as.numeric(Tumor.Size),
+    Regional.Node.Examined  = as.numeric(Regional.Node.Examined),
+    Reginol.Node.Positive   = as.numeric(Reginol.Node.Positive),
+    Survival.Months         = as.numeric(Survival.Months),
+    status                  = ifelse(Status == "Dead", 1, 0),  # 1 = dead, 0 = alive
+    
+    # Categorical variables as regular factors
+    Race           = factor(Race),
+    Marital.Status = factor(Marital.Status),
+    T.Stage        = factor(T.Stage),
+    N.Stage        = factor(N.Stage),
+    X6th.Stage     = factor(X6th.Stage),
+    Grade          = factor(Grade),
+    A.Stage        = factor(A.Stage),
+    Estrogen.Status     = factor(Estrogen.Status),
+    Progesterone.Status = factor(Progesterone.Status)
+  ) %>%
+  
+  # reorder columns to put survival variables first
+  dplyr::select(
+    status,
+    Age, Race, Marital.Status,
+    T.Stage, N.Stage, X6th.Stage, Grade, A.Stage,
+    Tumor.Size,
+    Estrogen.Status, Progesterone.Status,
+    Regional.Node.Examined, Reginol.Node.Positive,
+    everything()
+  )
+```
+
+```{r}
+skim(df_seer_clean)
+
+```
+
+
+```{r}
+
+#plots for numerics :
+numeric_vars <- df_seer_clean[, sapply(df_seer_clean, is.numeric)]
+
+
+#  Histograms of numeric variables
+
+
+for (v in names(numeric_vars)) {
+  print(
+    ggplot(df_seer_clean, aes(x = .data[[v]])) +
+      geom_histogram(bins = 30, fill = "lightblue", color = "white") +
+      theme_minimal() +
+      labs(
+        title = paste("Histogram of", v),
+        x = v,
+        y = "Count"
+      )
+  )
+}
+
+
+
+```
+```{r}
+#plots for cat
+library(ggplot2)
+library(dplyr)
+
+# Select categorical variables
+cat_vars <- df_seer_clean[, sapply(df_seer_clean, is.factor)]
+
+# Loop and plot each categorical variable
+for (v in names(cat_vars)) {
+  
+  plot_obj <- ggplot(df_seer_clean, aes(x = .data[[v]])) +
+    geom_bar(fill = "lightgreen", color = "white") +
+    geom_text(
+      stat = "count",
+      aes(label = ..count..),
+      vjust = -0.3,
+      size = 3
+    ) +
+    theme_minimal() +
+    labs(
+      title = paste("Bar Plot of", v),
+      x = v,
+      y = "Count"
+    ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)  # rotate labels for readability
+    )
+  
+  print(plot_obj)
+}
+
+```
+
+```{r}
+
+library(corrplot)
+
+# Select numeric variables for correlation
+corr_vars <- df_seer_clean[, c(
+  "Age",
+  "Tumor.Size",
+  "Regional.Node.Examined",
+  "Reginol.Node.Positive",
+  "Survival.Months"
+  # You can add "status" if you want: "status"
+)]
+
+# Compute Spearman correlation matrix
+cor_mat <- cor(corr_vars, method = "spearman", use = "complete.obs")
+cor_mat
+
+
+corrplot(
+  cor_mat,
+  method = "color",
+  type = "upper",
+  tl.col = "black",
+  tl.srt = 45,
+  addCoef.col = "black",   # add correlation numbers
+  number.cex = 0.8,
+  col = colorRampPalette(c("darkblue", "white", "darkred"))(200),
+  title = "Correlation Among Numeric Variables in the SEER Breast Cancer Dataset",
+  mar = c(0,0,3,0)
+)
+
+
+```
+
+#### The numeric variables in the dataset show weak correlations overall, except for a modest relationship between nodes examined and nodes positive, and a perfect expected identity between time and Survival.Months. There is no harmful multicollinearity, so all numeric predictors are suitable for use in survival models.
+
+-------------
+Handling ties
+-------------
+
+```{r}
+t_event <- df_seer_clean$Survival.Months[df_seer_clean$status == 1]     # Extract survival times for events only.
+
+n_event <- length(t_event)                                              # Total number of observed events.
+n_unique_event <- length(unique(t_event))                               # Number of unique event times.
+cat("Events:", n_event, "\nUnique event times:", n_unique_event, "\n")
+cat("Fraction tied (events):", 1 - n_unique_event/n_event, "\n")
+```
+```{r}
+ties_choice <- "efron"  # Heavy ties in event times (≈84%); Efron is preferred over Breslow and discrete is too heavy.
+```
+
+-------------------------------
+Handling right-skewed variables
+-------------------------------
+
+```{r}
+# Creating log(1 + x) columns for right-skewed columns
+df_seer_clean$Tumor.Size_log <- log1p(df_seer_clean$Tumor.Size)   
+df_seer_clean$Regional.Node.Examined_log <- log1p(df_seer_clean$Regional.Node.Examined)   
+df_seer_clean$Reginol.Node.Positive_log <- log1p(df_seer_clean$Reginol.Node.Positive)  
+
+# Checking the new distribution
+vars_to_plot <- c(
+  "Tumor.Size_log",
+  "Regional.Node.Examined_log",
+  "Reginol.Node.Positive_log"
+)
+
+for (v in vars_to_plot) {
+  p <- ggplot(df_seer_clean, aes(x = .data[[v]])) +
+    geom_histogram(bins = 30, fill = "lightblue", color = "white") +
+    theme_minimal() +
+    labs(
+      title = paste("Histogram of", v),
+      x = v,
+      y = "Count"
+    )
+  print(p)
+}
+
+```
+After applying the log(1 + x) transformation, the distributions are noticeably less right-skewed and the long tails are compressed. This makes the variables more well-behaved for modeling.
+
+
+
+```{r}
+# Create a new feature: node_ratio = (number of positive nodes) / (number of examined nodes).
+
+df_seer_clean <- df_seer_clean %>%
+  mutate(
+    node_ratio = case_when(
+      Regional.Node.Examined == 0 & Reginol.Node.Positive == 0 ~ 0,         # examined = 0 and positive = 0  -> define node_ratio = 0
+      Regional.Node.Examined == 0 & Reginol.Node.Positive  > 0 ~ NA_real_,  # examined = 0 and positive > 0  -> set node_ratio = NA
+      TRUE ~ Reginol.Node.Positive / Regional.Node.Examined
+    )
+  )
+
+ggplot(df_seer_clean, aes(x = node_ratio)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "white") +
+  theme_minimal() +
+  labs(title = "Histogram of node_ratio", x = "node_ratio", y = "Count")
+
+```
+
+
+
+May, for later on, when running cox, make sure you put this ties option. --- DONE later at cox analysis 
+coxph(Surv(Survival.Months, status) ~ ..., data = df_seer_clean, ties = ties_choice)
+
+Part C (may)
+
+--------------------------------
+Km and RMST 
+--------------------------------
+RMST = Restricted Mean Survival Time
+RMST is in the Kaplan–Meier (KM) curve.
+
+`
+```{r}
+#Cat varivales : for KM 
+#    Race         
+#    Marital.Status 
+#    T.Stage      
+#    N.Stage        
+#    X6th.Stage     
+#    Grade          
+#    A.Stage      
+#    Estrogen.Status     
+#    Progesterone.Status 
+
+
+km_Race <- survfit(Surv(Survival.Months, status) ~ Race, data = df_seer_clean)
+km_Marital.Status <-survfit(Surv(Survival.Months, status) ~ Marital.Status, data = df_seer_clean)
+km_T.Stage <-survfit(Surv(Survival.Months, status) ~ T.Stage, data = df_seer_clean)
+km_N.Stage <-survfit(Surv(Survival.Months, status) ~ N.Stage, data = df_seer_clean)
+km_X6th.Stage <-survfit(Surv(Survival.Months, status) ~ X6th.Stage, data = df_seer_clean)
+km_Grade <-survfit(Surv(Survival.Months, status) ~ Grade, data = df_seer_clean)
+km_A.Stage <-survfit(Surv(Survival.Months, status) ~ A.Stage, data = df_seer_clean)
+km_Estrogen.Status <-survfit(Surv(Survival.Months, status) ~ Estrogen.Status, data = df_seer_clean)
+km_Progesterone.Status <-survfit(Surv(Survival.Months, status) ~ Progesterone.Status, data = df_seer_clean)
+
+
+#Plot for each Varibles :
+
+library(survminer)
+
+
+ggsurvplot(km_Race, 
+           data = df_seer_clean, 
+           pval = TRUE,           
+           conf.int = TRUE,         
+           risk.table = FALSE,       
+           title = "Survival by Race",
+           xlab = "Months",
+           legend.labs = levels(as.factor(df_seer_clean$Race))) 
+
+ggsurvplot(km_Marital.Status, 
+           data = df_seer_clean, 
+           pval = TRUE,           
+           conf.int = TRUE,         
+           risk.table = FALSE,       
+           title = "Survival by Marital.Status",
+           xlab = "Months",
+           legend.labs = levels(as.factor(df_seer_clean$Marital.Status))) 
+
+ggsurvplot(km_T.Stage, 
+           data = df_seer_clean, 
+           pval = TRUE,           
+           conf.int = TRUE,         
+           risk.table = FALSE,       
+           title = "Survival by T.Stage",
+           xlab = "Months",
+           legend.labs = levels(as.factor(df_seer_clean$T.Stage))) 
+
+
+ggsurvplot(km_N.Stage, 
+           data = df_seer_clean, 
+           pval = TRUE,           
+           conf.int = TRUE,         
+           risk.table = FALSE,       
+           title = "Survival by N.Stage",
+           xlab = "Months",
+           legend.labs = levels(as.factor(df_seer_clean$N.Stage))) 
+
+
+ggsurvplot(km_X6th.Stage, 
+           data = df_seer_clean, 
+           pval = TRUE,           
+           conf.int = TRUE,         
+           risk.table = FALSE,       
+           title = "Survival by 6th Stage",
+           xlab = "Months",
+           legend.labs = levels(as.factor(df_seer_clean$X6th.Stage))) 
+
+ggsurvplot(km_Grade, 
+           data = df_seer_clean, 
+           pval = TRUE,           
+           conf.int = TRUE,         
+           risk.table = FALSE,       
+           title = "Survival by Grade",
+           xlab = "Months",
+           legend.labs = levels(as.factor(df_seer_clean$Grade))) 
+
+ggsurvplot(km_A.Stage, 
+           data = df_seer_clean, 
+           pval = TRUE,           
+           conf.int = TRUE,         
+           risk.table = FALSE,       
+           title = "Survival by A.Stage",
+           xlab = "Months",
+           legend.labs = levels(as.factor(df_seer_clean$A.Stage))) 
+
+ggsurvplot(km_Estrogen.Status, 
+           data = df_seer_clean, 
+           pval = TRUE,           
+           conf.int = TRUE,         
+           risk.table = FALSE,       
+           title = "Survival by Estrogen.Status",
+           xlab = "Months",
+           legend.labs = levels(as.factor(df_seer_clean$Estrogen.Status))) 
+
+
+ggsurvplot(km_Progesterone.Status, 
+           data = df_seer_clean, 
+           pval = TRUE,           
+           conf.int = TRUE,         
+           risk.table = FALSE,       
+           title = "Survival by Progesterone.Status",
+           xlab = "Months",
+           legend.labs = levels(as.factor(df_seer_clean$Progesterone.Status))) 
+
+
+
+```
+
+
+
+-------------------------------------------------------------------------
+ DATA INTEGRITY & IMBALANCE NOTE:
+-------------------------------------------------------------------------
+ There is a significant imbalance in patient counts between levels of 
+ categorical variables (e.g., Estrogen.Status, Marital.Status). Large 
+ disparities in group sizes can reduce statistical power for the smaller 
+ group and potentially bias survival estimates if not properly addressed. 
+ To ensure the validity of the results and confirm that no statistical 
+ errors or biases occur due to these gaps, we perform several diagnostic 
+ checks:
+ 1. Standard Error Analysis: To assess the precision of the survival estimates.
+ 2. Multivariate Cox Modeling: To adjust for confounding variables.
+ 3. Log-Rank vs. RMST Comparison: To verify effect size consistency.
+-------------------------------------------------------------------------
+
+ --- STEP 1: Precision Check (Standard Errors) ---
+ Inspecting the 'se' and Confidence Intervals. Large SEs in small groups
+ suggest that the survival curve is unstable at later time points.
+
+ --- STEP 2: Confounding Check (Multivariate Cox) ---
+ We use a Multivariate Cox model to ensure the "Imbalance" isn't masking 
+ other effects. By including variables like Age and T.Stage, we determine 
+ if the main variable is an "Independent Predictor."
+cox_check <- coxph(Surv(Survival.Months, status) ~ Estrogen.Status + Age + T.Stage, 
+                   data = df_seer_clean)
+summary(cox_check)
+
+ --- STEP 3: Effect Size Check (RMST) ---
+ Since p-values are sensitive to sample size, we use RMST to quantify the 
+ clinical significance (actual months lost/gained). This provides a 
+ magnitude of effect that is less influenced by the sheer volume of the 
+ larger group compared to the Log-Rank test alone.
+
+--- STEP 4: Visualizing Group Sizes (Risk Table) ---
+ Always include a Risk Table to transparently show how many patients 
+ remain in the smaller group at each time point.
+
+
+
+
+-------------------------------------------------------------------------
+ RMST ANALYSIS FUNCTION
+-------------------------------------------------------------------------
+
+```{r}
+
+# List of all categorical variables for RMST analysis
+vars_to_test <- c("Race", "Marital_Combined", "T.Stage", "N.Stage", 
+                  "X6th.Stage", "Grade", "A.Stage", "Estrogen.Status", 
+                  "Progesterone.Status")
+
+# Define the time limit for the analysis (100 months)
+tau_value <- 100
+
+
+# -------------------------------------------------------------------------
+# RMST ANALYSIS FUNCTION
+# -------------------------------------------------------------------------
+# This function automates the comparison between a reference group 
+# and a target group within any variable.
+
+run_single_rmst <- function(data, variable, ref_group, target_group, tau = 100) {
+  
+  # 1. Filter the dataset for only the two groups being compared
+  subset_data <- data[data[[variable]] %in% c(ref_group, target_group), ]
+  
+  # 2. Assign 'arm' (0 = Reference, 1 = Target)
+  # RMST will calculate: Survival(Target) - Survival(Reference)
+  subset_data$arm <- ifelse(subset_data[[variable]] == target_group, 1, 0)
+  
+  # 3. Execute RMST analysis
+  # Using try() to ensure the code continues if a specific group has no events
+  result <- try(rmst2(time   = subset_data$Survival.Months, 
+                      status = subset_data$status, 
+                      arm    = subset_data$arm, 
+                      tau    = tau))
+  
+  cat("\n==================================================\n")
+  cat("ANALYSIS FOR:", variable, "\n")
+  cat("COMPARING:", ref_group, "(Ref) vs", target_group, "\n")
+  cat("==================================================\n")
+  
+  if(class(result) != "try-error") {
+    print(result)
+    plot(result, xlab = "Months", ylab = "Survival Probability")
+  }
+}
+
+ #  Binary Variable (Estrogen Status) 
+run_single_rmst(df_seer_clean, "Estrogen.Status", "Negative", "Positive", tau = 100)
+
+run_single_rmst(df_seer_clean, "Progesterone.Status", "Negative", "Positive", tau = 100)
+
+#  Multi-level Variable (Marital Status, Race) - Not intresting Not doing this 
+# Let's compare Married vs Divorced/Separated
+#run_single_rmst(df_seer_clean, "Marital_Combined", "Married (including common law)", "Divorced/Separated", tau = 100)
+
+#  T-Stage (T1 vs T4) 
+# This shows the most extreme difference in tumor stages
+run_single_rmst(df_seer_clean, "T.Stage", "T1", "T4", tau = 100)
+
+
+
+
+# -------------------------------------------------------------------------
+# RMST RELIABILITY CHECKLIST: EVALUATING BIAS AND STABILITY
+# -------------------------------------------------------------------------
+# Use this table to determine if the sample size imbalance between groups 
+# (e.g., small Negative group vs. large Positive group) affects the results.
+# -------------------------------------------------------------------------
+#
+# | METRIC                | RELIABLE RESULT (GOOD)       | SUSPICIOUS RESULT (BAD)       |
+# |-----------------------|------------------------------|-------------------------------|
+# | Standard Error (SE)   | Low SE (typically < 5.0)     | High SE (e.g., > 10.0 - 15.0) |
+# |                       | Indicates a stable mean.      | Indicates high volatility.    |
+# |-----------------------|------------------------------|-------------------------------|
+# | 95% Confidence        | Narrow interval. Provides    | Very wide interval. Indicates |
+# | Interval (CI)         | a precise estimate.          | a lack of precision.          |
+# |-----------------------|------------------------------|-------------------------------|
+# | P-value               | Significant (p < 0.05).      | Non-significant (p > 0.05).   |
+# |                       | Real statistical difference. | Potential random noise.       |
+# |-----------------------|------------------------------|-------------------------------|
+# | KM Curve Shape        | Smooth, gradual curves.      | Jagged, "steppy" curves.      |
+# |                       | Sufficient data throughout.  | Sensitive to single deaths.   |
+# |-----------------------|------------------------------|-------------------------------|
+# | CI Overlap            | No overlap between groups.   | Significant overlap. Groups   |
+# |                       | Strong biological effect.    | might be too similar.         |
+# |-----------------------|------------------------------|-------------------------------|
+# | At-Risk Numbers       | Risk table > 10-20 patients  | Very few patients (< 5)       |
+# |                       | remaining at the end.        | remaining at the end.         |
+# -------------------------------------------------------------------------
+
+# EXAMPLE OF HOW TO INTERPRET YOUR CURRENT RESULTS:
+# For Progesterone.Status:
+# - SE (arm=0) was 1.189 (Low/Good)
+# - CI was [9.6 to 14.5] (Narrow/Good)
+# - KM curve was smooth (Good)
+# CONCLUSION: Results are reliable despite group size imbalance.
+
+#We can add more RMST according to the Varibles we will choםse, also an option is to combine levels together and then do the KM and the RMST 
+
+
+```
+
+
+
+
+-------------------------------------------------------------------------
+cox ANALYSIS 
+-------------------------------------------------------------------------
+
+```{r}
+
+# -------------------------------------------------------------------------
+# MULTIVARIATE COX PROPORTIONAL HAZARDS MODEL
+# -------------------------------------------------------------------------
+# This model evaluates the independent effect of each variable on survival.
+# We include clinical stages, hormone status, and demographics.
+# -------------------------------------------------------------------------
+
+
+cox_model_final <- coxph(Surv(Survival.Months, status) ~ 
+                           Age + 
+                           Race + 
+                           Tumor.Size +       # Continuous size for better precision
+                           node_ratio +       # Ratio of positive nodes
+                           Grade + 
+                           Estrogen.Status + 
+                           Progesterone.Status, 
+                         data = df_seer_clean, ties = ties_choice)
+
+# Display the full results
+summary(cox_model_final)
+
+# -------------------------------------------------------------------------
+# WHY THESE VARIABLES? - we can add more or intercation but seems its not needed 
+# -------------------------------------------------------------------------
+# 1. Age: Essential control for baseline mortality risk.
+# 2. Tumor.Size & node_ratio: Based on your correlation matrix, these 
+#    have the strongest negative impact on survival months.
+# 3. Estrogen/Progesterone: Crucial biological drivers of breast cancer prognosis.
+# 4. Marital_Combined: To see if social factors remain significant after
+#    adjusting for all clinical/biological factors.
+# -------------------------------------------------------------------------
+
+```
+The multivariate Cox proportional hazards model demonstrated high predictive accuracy with a Concordance index of 0.735, indicating that the model correctly identifies survival trends in 73.5% of cases. Potential biases arising from sample size imbalances were addressed by adjusting for key clinical and biological confounders, including Age, Tumor Size, and Nodal Status. The stability of the results is further supported by the narrow confidence intervals and low standard errors for most significant predictors, suggesting that the observed hazard ratios represent robust biological effects rather than statistical artifacts
+
+What makes your results "Good"?The Concordance (0.735): Anything above 0.7 is considered a strong model in medical research.Significance across the board: Even when you put all variables together, they still remain significant. This means they are Independent Predictors.The Log-Rank/Wald Tests: At the bottom of your output, the p-values for these tests are $< 2e-16$. This means it is nearly impossible that these results occurred by chance.
+
+
+# -------------------------------------------------------------------------
+# CHECKING THE PROPORTIONAL HAZARDS (PH) ASSUMPTION
+# -------------------------------------------------------------------------
+```{r}
+# This test checks if the Hazard Ratio stays constant over time.
+# A p-value > 0.05 means the assumption is met (the model is valid).
+
+ph_test <- cox.zph(cox_model_final)
+
+# Print the results
+print(ph_test)
+
+# Visualize the test
+# If the line is flat, the assumption holds. 
+# If there is a sharp curve, the assumption is violated for that variable.
+plot(ph_test)
+
+```
+
+
+The survival analysis was conducted using both Multivariate Cox Proportional Hazards (PH) modeling and Restricted Mean Survival Time (RMST) to ensure robust results. The Cox model demonstrated high predictive performance (Concordance = 0.735), identifying node_ratio (HR = 4.53) and Grade IV (HR = 3.18) as the strongest independent risk factors, while Estrogen and Progesterone positivity served as significant protective factors (HR = 0.50 and 0.60, respectively). Although the Schoenfeld residual tests for Estrogen and Progesterone Status yielded low p-values (p < 0.05), indicating a violation of the proportional hazards assumption, visual inspection of the residual plots revealed that these deviations were likely due to time-dependent biological effects in a large sample size ($N=4,024$). To account for this, RMST analysis was utilized as a non-parametric alternative that does not rely on the PH assumption. The RMST results confirmed a significant survival advantage for hormone-receptor-positive patients, with a meaningful gain of approximately 12 to 20 months of survival within a 100-month follow-up period. Overall, the consistency between the Cox model and the RMST areas under the curve confirms that the findings are statistically stable and clinically significant.
+
+
+--- Random Survival Forest ---
+
+
+```{r}
+# Creating the forest with the basic covariates and the engineered features.
+rsf_df <- df_seer_clean %>%
+  transmute(
+    time = as.numeric(Survival.Months),  
+    status = as.integer(status),
+    Age, Race, Marital.Status, T.Stage, N.Stage, X6th.Stage, Grade, A.Stage,
+    Tumor.Size_log, Regional.Node.Examined_log, Reginol.Node.Positive_log, node_ratio,
+    Estrogen.Status, Progesterone.Status
+  )
+
+# Ensure categorical variables are factors 
+rsf_df <- rsf_df %>%
+  mutate(across(c(Race, Marital.Status, T.Stage, N.Stage, X6th.Stage, Grade, A.Stage,
+                  Estrogen.Status, Progesterone.Status), as.factor))
+
+# p = number of predictors (exclude time/status)
+p <- ncol(rsf_df) - 2
+mtry_p3   <- ceiling(p / 3)
+
+cat("RSF predictors (p) =", p, "\n")
+cat("mtry = ceiling(p/3) =", mtry_p3, "\n")
+```
+
+
+Fit RSF with the lectures defaults
+
+```{r}
+rsf_fit <- rfsrc(
+  Surv(time, status) ~ .,
+  data = rsf_df,
+  ntree = 500,
+  mtry = mtry_p3,         
+  nodesize = 5,           
+  importance = "permute", 
+  na.action = "na.impute",
+  block.size = 1          # so we can plot OOB error vs number of trees
+)
+
+rsf_fit
+```
+
+
+“does the forest converge by ~500 trees?”
+```{r}
+oob <- rsf_fit$err.rate
+oob_vec <- if (is.matrix(oob)) oob[, 1] else oob
+
+plot(
+  x = seq_along(oob_vec),
+  y = oob_vec,
+  type = "l",
+  xlab = "Number of trees",
+  ylab = "OOB prediction error (1 - C)",
+  main = "RSF: OOB prediction error vs. trees"
+)
+```
+“Here we plot OOB prediction error, defined as (1 − C-index), as we add more trees. The error decreases sharply at the beginning because averaging many survival trees reduces variance. After roughly 50–100 trees the curve stabilizes near 0.29–0.30, indicating the forest has converged. Using 500 trees is therefore sufficient and gives stable OOB performance.”
+
+
+
+
+
+
+--- Permutation vimp ---
+
+```{r}
+vimp <- rsf_fit$importance
+vimp <- sort(vimp, decreasing = TRUE)
+
+par(mar = c(4, 10, 3, 1))  
+bp <- barplot(
+  vimp,
+  horiz = TRUE,
+  las = 1,
+  xlab = "VIMP (permutation importance)",
+  main = "RSF: Permutation Variable Importance (VIMP)"
+)
+
+abline(v = 0, lty = 2)
+```
+For each variable, we permute that variable in the OOB data (break its association with the outcome) and measure how much the model’s OOB prediction error increases.
+Bigger bar = bigger increase in error = more important predictor for prediction.
+
+Values near 0 mean the forest barely uses that variable for prediction (given all the others).
+
+
+It makes a lot of sense: nodal burden and hormone receptor status often dominate survival risk stratification.
+
+Two things worth mentioning:
+
+Two “professor gotcha” clarifications (you can say them)
+
+VIMP is conditional on the other variables.
+If two predictors contain similar information (collinearity / redundancy), each may look less important than expected because the forest can substitute one for the other.
+
+VIMP is not causality.
+It is purely predictive importance: “if we destroy this variable’s information, how much does prediction degrade?”
+
+SO WE NEED TO ADD HERE WHAT CAN BE DEPENDENT!!
+
+
+
+“This plot shows permutation variable importance. For each predictor, we permute its values in the out-of-bag samples and recompute prediction error. The increase in error is the variable’s importance. Larger bars indicate variables that the forest relies on most for prediction. Here, node_ratio is the dominant predictor, followed by estrogen and progesterone receptor status, and then measures of nodal involvement and stage.”
+
+
+```{r}
+# get.cindex returns the OOB "requested performance error" 
+pe_oob <- get.cindex(rsf_fit$yvar[,1], rsf_fit$yvar[,2], rsf_fit$predicted.oob)
+cindex_oob <- 1 - pe_oob
+
+cat("OOB prediction error (1 - C) =", round(pe_oob, 4), "\n")
+cat("OOB C-index                =", round(cindex_oob, 4), "\n")
+
+```
+“The C-index measures how well the model orders patients by risk. Here the OOB prediction error is 0.293, so the equivalent OOB C-index is 0.707. 
+
+
+A C-index of 0.7066 means: in about 71% of comparable patient pairs, the model correctly ranks the patient with the earlier event as higher risk (higher predicted hazard / lower predicted survival).
+
+
+```{r}
+bs_km  <- get.brier.survival(rsf_fit, cens.mode = "km")$brier.score
+bs_rsf <- get.brier.survival(rsf_fit, cens.mode = "rfsrc")$brier.score
+
+plot(bs_km, type = "s", col = "black", lwd = 2, lty = 1,
+     xlab = "time", ylab = "brier score",
+     main = "Brier score over time (KM vs RSF censoring)")
+
+lines(bs_rsf, type = "s", col = "red", lwd = 2, lty = 1)
+
+legend("bottomright",
+       legend = c("cens.mode = km", "cens.mode = rfsrc"),
+       col    = c("black", "red"),
+       lty    = c(1, 1),
+       lwd    = 2,
+       bty    = "n")
+
+```
+“Here we evaluate calibration/accuracy over time using the time-dependent Brier score. The Brier score is a squared-error loss for survival probability predictions, and it is adjusted for censoring with IPCW. We compare two ways to estimate the censoring distribution: Kaplan–Meier in black and an RSF-based censoring model in red. The two curves almost overlap, meaning the evaluation is robust to the censoring-model choice. We also see the Brier score increasing over time, which is expected because long-horizon prediction becomes harder and fewer patients remain at risk.”
+
+
+
+
+
+
+---
+
+
+```{r}
+# Get predictor names (exclude outcome columns)
+predictor_cols <- setdiff(names(rsf_df), c("time", "status"))
+
+for (vary_var in predictor_cols) {
+
+  patient_low  <- typical_row
+  patient_high <- typical_row
+
+  # ---- Numeric: Q25 vs Q75 (exactly your logic) ----
+  if (is.numeric(rsf_fit$xvar[[vary_var]]) || is.integer(rsf_fit$xvar[[vary_var]])) {
+
+    q25 <- as.numeric(quantile(rsf_fit$xvar[[vary_var]], 0.25, na.rm = TRUE))
+    q75 <- as.numeric(quantile(rsf_fit$xvar[[vary_var]], 0.75, na.rm = TRUE))
+
+    # If variable is constant or quantiles collapse, skip
+    if (!is.finite(q25) || !is.finite(q75) || q25 == q75) next
+
+    patient_low[[vary_var]]  <- q25
+    patient_high[[vary_var]] <- q75
+
+    newdata <- rbind(patient_low, patient_high)
+    pred <- predict(rsf_fit, newdata = newdata)
+
+    plot(round(pred$time.interest, 2), pred$survival[1, ],
+         type = "l", xlab = "Time (Months)", ylab = "Survival",
+         main = paste("RSF predicted survival:", vary_var))
+    lines(round(pred$time.interest, 2), pred$survival[2, ], lty = 2)
+
+    legend("topright",
+           legend = c(paste0(vary_var, " = Q25 (", round(q25, 3), ")"),
+                      paste0(vary_var, " = Q75 (", round(q75, 3), ")")),
+           lty = c(1, 2), bty = "n")
+
+  } else {
+    # ---- Factor: top 2 most common levels ----
+    tab <- sort(table(rsf_fit$xvar[[vary_var]]), decreasing = TRUE)
+    if (length(tab) < 2) next
+
+    lev1 <- names(tab)[1]
+    lev2 <- names(tab)[2]
+
+    patient_low[[vary_var]]  <- lev1
+    patient_high[[vary_var]] <- lev2
+
+    newdata <- rbind(patient_low, patient_high)
+    pred <- predict(rsf_fit, newdata = newdata)
+
+    plot(round(pred$time.interest, 2), pred$survival[1, ],
+         type = "l", xlab = "Time (Months)", ylab = "Survival",
+         main = paste("RSF predicted survival:", vary_var))
+    lines(round(pred$time.interest, 2), pred$survival[2, ], lty = 2)
+
+    legend("topright",
+           legend = c(paste0(vary_var, " = ", lev1),
+                      paste0(vary_var, " = ", lev2)),
+           lty = c(1, 2), bty = "n")
+  }
+}
+
+```
+
+On the presentation we will first show all for a second, and than we will focus on Race, node ratio and estrogen
+
+
+We really beed to add a description for whats going on in each one and explain why we choose it.
+
+---
+VIMP with **delete-d jackknife 99% asymptotic normal CIs (Need to decide which one to keep, maybe both?)
+
+
+```{r}
+jk_obj <- subsample(rsf_fit)
+
+# Match the lecture-style long-margin plot for variable names
+par(oma = c(0.5, 10, 0.5, 0.5))
+par(mar = c(6.0, 17, 1, 1), mgp = c(4, 1, 0))
+
+plot(jk_obj,
+     xlab = "Variable Importance (x 100)",
+     alpha = .01,     # 99% intervals
+     normal = TRUE,   # asymptotic normal CI
+     jknife = TRUE,   # delete-d jackknife variance
+     cex = 1.1)
+```
+“This figure adds inference to permutation variable importance. For each predictor, we permute it in the out-of-bag data and measure the increase in prediction error; the square shows the VIMP estimate. To quantify uncertainty, we use the subsampling procedure and compute delete-d jackknife standard errors, then form 99% asymptotic normal confidence intervals. Variables whose intervals are fully above zero are consistently predictive. In our data, node_ratio is clearly the dominant predictor, followed by estrogen and progesterone receptor status, and then measures of nodal involvement and staging.”
+
+
+If Malka will ask:
+The x-axis label says “vimp (time)”. That’s normal in randomForestSRC survival outputs: the VIMP is computed with respect to the survival prediction target over time (it’s not “importance changes with time”; it’s “importance for the survival outcome”). If your professor asks, you can say: “It’s VIMP for the survival outcome evaluated through the RSF survival prediction error.”
+
